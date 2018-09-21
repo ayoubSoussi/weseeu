@@ -1,8 +1,8 @@
 
 # import the necessary packages
-from traitement_BD.classes import Collecteur,Writer
-from traitement_BD.module import etudiants_CNE
-from model.classes import Fiche_absence,Etudiant
+from gestion_absence.traitement_BD.classes import Collecteur,Writer
+from gestion_absence.traitement_BD.module import etudiants_CNE
+from gestion_absence.model.classes import Fiche_absence, Etudiant
 from imutils.video import VideoStream
 import face_recognition
 import datetime
@@ -10,7 +10,10 @@ import imutils
 import pickle
 import time
 import cv2
+from scipy.spatial import distance as dist
 
+EYE_AR_THRESH = 0.3
+EYE_AR_CONSEC_FRAMES = 3
 
 class Recognizer :
     def __init__(self):
@@ -90,7 +93,7 @@ class Recognizer :
 
         # charger les encodages de tous les étudiants
         print("[INFO] loading encodings...")
-        data = pickle.loads(open("encodings.pickle", "rb").read())
+        data = pickle.loads(open("gestion_absence/reconnaissance/encodings.pickle", "rb").read())
 
         # initialiser le video stream et pointer sur la sortie du fichier video, puis
         # permettre la caméra de se réchauffer
@@ -100,6 +103,8 @@ class Recognizer :
         time.sleep(2.0)
         # initialiser l'ensemble des étudiants présents
         etudiants_presents = set()
+        #initialiser le compteur des blink
+        counters = dict()
         # boucler sur des frames du video stream
         while current_time < finish_time :
 
@@ -119,9 +124,10 @@ class Recognizer :
                                                     model="hog")
             encodings = face_recognition.face_encodings(rgb, boxes)
             names = []
-
-            # boucler sur les encodages
-            for encoding in encodings:
+            #TODO: extraire les landmarks
+            landmarks = face_recognition.face_landmarks(rgb,boxes)
+            # boucler sur les encodages #TODO boucler aussi sur les landmarks
+            for encoding,landmark in zip(encodings,landmarks):
                 # comparer les encodages du visage détecté avec celles
                 # des visage déjà connus
                 matches = face_recognition.compare_faces(data["encodings"],
@@ -146,15 +152,47 @@ class Recognizer :
                     # votes
                     name = max(counts, key=counts.get)
 
-                # mise à jour de la liste des noms
-                names.append(name)
+                    #TODO : calculer le EAR a partir du variable landmark et faire la comparaison
+                    # extract the left and right eye coordinates, then use the
+                    # coordinates to compute the eye aspect ratio for both eyes
+                    leftEye = landmark.get("left_eye")
+                    rightEye = landmark.get("right_eye")
+                    leftEAR = eye_aspect_ratio(leftEye)
+                    rightEAR = eye_aspect_ratio(rightEye)
+
+                    # average the eye aspect ratio together for both eyes
+                    ear = (leftEAR + rightEAR) / 2.0
+
+                    # check to see if the eye aspect ratio is below the blink
+                    # threshold, and if so, increment the blink frame counter
+                    print(ear)
+                    if not name in counters.keys() :
+                        counters[name] = 0
+                    if ear < EYE_AR_THRESH:
+                        counters[name] += 1
+
+                    # otherwise, the eye aspect ratio is not below the blink
+                    # threshold
+                    else:
+                        # if the eyes were closed for a sufficient number of
+                        # then increment the total number of blinks
+                        if name != "Unknown" and counters[name] >= EYE_AR_CONSEC_FRAMES:
+                            etudiants_presents.add(name)
+
+
+
+
+
+
                 # Ajouter l'étudiant détecté à l'ensemble des étudiants
                 # reconnus pendant la séance
                 if name != "Unknown":
+                    names.append(name)
                     etudiants_presents.add(name)
 
             # boucler sur les visages reconnus dans le frame
-            for ((top, right, bottom, left), name) in zip(boxes, names):
+            print(counters)
+            for ((top, right, bottom, left),name) in zip(boxes,names):
                 # rescale the face coordinates
                 top = int(top * r)
                 right = int(right * r)
@@ -195,5 +233,23 @@ class Recognizer :
             writer.release()
         time.sleep(2.0)
         return etudiants_presents
+
+
+
+def eye_aspect_ratio(eye):
+    # compute the euclidean distances between the two sets of
+    # vertical eye landmarks (x, y)-coordinates
+    A = dist.euclidean(eye[1], eye[5])
+    B = dist.euclidean(eye[2], eye[4])
+
+    # compute the euclidean distance between the horizontal
+    # eye landmark (x, y)-coordinates
+    C = dist.euclidean(eye[0], eye[3])
+
+    # compute the eye aspect ratio
+    ear = (A + B) / (2.0 * C)
+
+    # return the eye aspect ratio
+    return ear
 
 

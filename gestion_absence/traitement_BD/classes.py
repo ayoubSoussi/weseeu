@@ -1,7 +1,7 @@
 import MySQLdb
 import datetime
-from model.classes import Seance,Fiche_absence
-from traitement_BD.module import getKey
+from gestion_absence.model.classes import Seance,Fiche_absence
+from gestion_absence.traitement_BD.module import getKey
 import json
 
 
